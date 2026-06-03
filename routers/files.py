@@ -1,7 +1,7 @@
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from services.scan_svc import _emp_dir
 from services.people_svc import find_by_name
