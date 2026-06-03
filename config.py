@@ -12,15 +12,53 @@ for _d in [INBOX_DIR, DEPT_DIR, BASE_DIR/"data", TEMPLATE_DIR, CHT_NOKIA_DIR, CH
     _d.mkdir(exist_ok=True)
 
 # File type keywords for classification
+# Order matters: more specific patterns first
 FILE_TYPE_KEYWORDS = {
-    "task_report":     ["taskreport", "task_report", "工作報告"],
-    "tr_approval":     ["tr_approval", "approval_mail", "approval mail"],
-    "ess_approval":    ["ess_approval", "ess approval", "ess"],
-    "ot_approval":     ["ot_approval", "ot approval", "_ot_"],
-    "ns_approval":     ["ns_approval", "ns approval", "nightshift", "night_shift"],
-    "travel_apply":    ["差旅申請", "travel_apply", "travel apply"],
-    "travel_approval": ["差旅approval", "travel_approval", "差旅 approval"],
-    "leave_approval":  ["請假approval", "leave_approval", "leave approval"],
+    "task_report": [
+        "taskreport", "task_report", "task report",
+        "daily task report", "daily_task_report",
+        "工作報告", "工作日報",
+    ],
+    "tr_approval": [
+        "tr_approval", "tr approval",
+        "approval_mail", "approval mail",
+        "re_ tr", "re:tr", "re: tr",
+        "approved tr", "tr approved",
+    ],
+    "ess_approval": [
+        "ess_approval", "ess approval",
+        "ess_rota", "ess rota",
+        "re_ ess", "re: ess",
+    ],
+    "ot_approval": [
+        "ot_approval", "ot approval",
+        "ot or shift", "ot_or_shift",
+        "overtime approval", "overtime request",
+        "shift request",
+        "re_ ot", "re: ot",
+    ],
+    "ns_approval": [
+        "ns_approval", "ns approval",
+        "night shift", "night_shift", "nightshift",
+        "ns request",
+        "re_ ns", "re: ns",
+    ],
+    "travel_approval": [
+        "travel_approval", "travel approval",
+        "travel datasheet", "travel_datasheet",
+        "差旅approval", "差旅 approval",
+        "re_ travel", "re: travel",
+    ],
+    "travel_apply": [
+        "差旅申請", "travel_apply", "travel apply",
+        "travel application", "travel form",
+        "出差申請",
+    ],
+    "leave_approval": [
+        "請假approval", "leave_approval", "leave approval",
+        "leave request", "leave form",
+        "re_ leave", "re: leave",
+    ],
 }
 
 # CHT Nokia column mapping (0-based)

@@ -32,8 +32,9 @@ async def import_files(files: list[UploadFile] = File(...)):
         dest = INBOX_DIR.joinpath(*rel.parts)
         file_bytes = await f.read()
 
-        # Skip exact duplicate (same path + same size)
-        if dest.exists() and dest.stat().st_size == len(file_bytes):
+        # Skip duplicate: same filename anywhere in dest folder + same size
+        same_name = dest.parent / dest.name if dest.parent.exists() else None
+        if same_name and same_name.exists() and same_name.stat().st_size == len(file_bytes):
             skipped.append(f.filename)
             continue
 
