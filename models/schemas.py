@@ -30,10 +30,15 @@ class TaEntry(BaseModel):
     amount:    Optional[float] = None
 
 class LeaveEntry(BaseModel):
-    dates:  str           # space-separated e.g. "0504 0514"
-    type:   str = "sick leave"
-    hours:  Optional[str] = None
-    reason: Optional[str] = None  # used when type == "other"
+    from_date: str = ""          # start date e.g. "2026-05-04"
+    to_date:   str = ""          # end date (same as from_date for single day)
+    tstart:    Optional[str] = None   # start time "09:00"
+    tend:      Optional[str] = None   # end time "18:00"
+    hours:     Optional[str] = None   # manual override if no time range
+    type:      str = "sick leave"
+    reason:    Optional[str] = None   # used when type == "other"
+    # Legacy field - kept for backward compat
+    dates:     Optional[str] = None
 
 class SubmitPayload(BaseModel):
     emp_name:    str

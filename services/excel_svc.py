@@ -20,14 +20,55 @@ def _fmt_ot(entries: list[OtEntry]) -> str:
 
 
 def _fmt_leave(entries: list[LeaveEntry]) -> str:
+    """
+    Format leave entries with 8-hour rule:
+    - hours >= 8 (full day): "0504, 0514_sick leave"
+    - hours < 8 (partial):   "0504, 0514_3hrs sick leave"
+    """
+    from datetime import date, timedelta
+    def expand_range(from_date: str, to_date: str) -> list[str]:
+        if not from_date:
+            return []
+        if not to_date or to_date == from_date:
+            return [from_date[5:].replace("-", "")]
+        cur = date.fromisoformat(from_date)
+        end = date.fromisoformat(to_date)
+        dates = []
+        while cur <= end:
+            dates.append(cur.strftime("%m%d"))
+            cur += timedelta(days=1)
+        return dates
+
     parts = []
     for e in entries:
-        if not e.dates:
+        if not e.from_date:
             continue
-        ds = ", ".join(e.dates.strip().split())
-        hrs = f"_{e.hours} " if e.hours else "_"
+        dates = expand_range(e.from_date, e.to_date or e.from_date)
+        ds = ", ".join(dates)
         label = e.reason if (e.type == "other" and e.reason) else e.type
-        parts.append(f"{ds}{hrs}{label}")
+
+        # Calculate hours from time range
+        hrs_val = None
+        if e.tstart and e.tend:
+            sh, sm = map(int, e.tstart.split(":"))
+            eh, em = map(int, e.tend.split(":"))
+            mins = (eh * 60 + em) - (sh * 60 + sm)
+            if mins < 0:
+                mins += 1440
+            hrs_val = mins / 60
+
+        if hrs_val is not None:
+            if hrs_val >= 8:
+                hrs_part = "_"          # full day, no time suffix
+            else:
+                h = int(hrs_val) if hrs_val == int(hrs_val) else round(hrs_val, 1)
+                hrs_part = f"_{h}hrs "
+        elif e.hours:
+            hrs_part = f"_{e.hours} "
+        else:
+            hrs_part = "_"
+
+        parts.append(f"{ds}{hrs_part}{label}")
     return "  ".join(parts)
 
 

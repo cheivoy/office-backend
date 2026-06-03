@@ -12,46 +12,21 @@ def _detect_type(filename: str) -> str:
     return "other"
 
 
-def scan_and_classify(period: str = "") -> dict:
-    """
-    Scan Inbox/, match files to employees, move to:
-      Departments/<proj>/<unit>/<pm>/<emp_en>/<period>/   if period given
-      Departments/<proj>/<unit>/<pm>/<emp_en>/             otherwise
-    period: e.g. "2026-P05"
-    """
-    results = {"moved": [], "unmatched": [], "kanban": []}
-    people  = get_all()
-
-    for fpath in list(INBOX_DIR.iterdir()):
-        if not fpath.is_file():
-            continue
-        matched = _match_person(fpath.name, people)
-        if not matched:
-            results["unmatched"].append(fpath.name)
-            continue
-
-        base_dir = _emp_dir(matched)
-        dest_dir = base_dir / period if period else base_dir
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        dest = dest_dir / fpath.name
-        if dest.exists():
-            dest = dest_dir / (fpath.stem + "_dup" + fpath.suffix)
-        shutil.move(str(fpath), str(dest))
-
-        results["moved"].append({
-            "file":   fpath.name,
-            "emp":    matched["en"],
-            "type":   _detect_type(fpath.name),
-            "period": period,
-            "dest":   str(dest.relative_to(DEPT_DIR)),
-        })
-
-    results["kanban"] = _build_full_kanban(people)
-    return results
+def _safe_dest(dest: Path) -> Path:
+    """Return a non-conflicting path by appending _2, _3... if needed."""
+    if not dest.exists():
+        return dest
+    stem, suffix = dest.stem, dest.suffix
+    counter = 2
+    while True:
+        candidate = dest.parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
-def _match_person(filename: str, people: list[dict]) -> dict | None:
+def _match_by_name(filename: str, people: list[dict]) -> dict | None:
+    """Match employee by Chinese or English name in filename."""
     fn = filename.lower().replace("_", " ").replace("-", " ")
     best, best_score = None, 0
     for p in people:
@@ -75,6 +50,93 @@ def _match_person(filename: str, people: list[dict]) -> dict | None:
     return best if best_score >= 3 else None
 
 
+def _match_by_folder(folder_name: str, people: list[dict]) -> dict | None:
+    """Match employee by folder name (fallback)."""
+    return _match_by_name(folder_name, people)
+
+
+def scan_and_classify(period: str = "") -> dict:
+    """
+    Scan Inbox/, match files to employees.
+    Strategy per file:
+      1. Match by filename (name in filename)
+      2. Match by parent folder name (if file came from a subfolder)
+      3. Unmatched → needs manual assignment
+    No overwrite: uses _safe_dest for duplicate filenames.
+    """
+    results = {"moved": [], "unmatched": [], "kanban": []}
+    people  = get_all()
+
+    for fpath in list(INBOX_DIR.rglob("*")):
+        if not fpath.is_file():
+            continue
+
+        matched = _match_by_name(fpath.name, people)
+
+        # Fallback: try folder name
+        if not matched:
+            rel = fpath.relative_to(INBOX_DIR)
+            if len(rel.parts) > 1:
+                folder = rel.parts[0]
+                matched = _match_by_folder(folder, people)
+
+        if not matched:
+            results["unmatched"].append({
+                "file": str(fpath.relative_to(INBOX_DIR)),
+                "inbox_path": str(fpath),
+            })
+            continue
+
+        base_dir = _emp_dir(matched)
+        dest_dir = base_dir / period if period else base_dir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        dest = _safe_dest(dest_dir / fpath.name)
+        shutil.move(str(fpath), str(dest))
+
+        results["moved"].append({
+            "file":   fpath.name,
+            "emp":    matched["en"],
+            "type":   _detect_type(fpath.name),
+            "period": period,
+            "dest":   str(dest.relative_to(DEPT_DIR)),
+            "method": "name" if _match_by_name(fpath.name, people) else "folder",
+        })
+
+    # Clean up empty Inbox subfolders
+    for d in sorted(INBOX_DIR.rglob("*"), reverse=True):
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+
+    results["kanban"] = _build_full_kanban(people)
+    return results
+
+
+def assign_manual(inbox_path: str, emp_en: str, period: str = "") -> dict:
+    """Manually assign an unmatched file to an employee."""
+    person = find_by_name(emp_en)
+    if not person:
+        raise ValueError(f"Employee '{emp_en}' not found")
+
+    src = Path(inbox_path)
+    if not src.exists():
+        raise FileNotFoundError(f"File not found: {inbox_path}")
+
+    base_dir = _emp_dir(person)
+    dest_dir = base_dir / period if period else base_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = _safe_dest(dest_dir / src.name)
+    shutil.move(str(src), str(dest))
+
+    return {
+        "file":   src.name,
+        "emp":    person["en"],
+        "type":   _detect_type(src.name),
+        "dest":   str(dest.relative_to(DEPT_DIR)),
+    }
+
+
 def _emp_dir(person: dict) -> Path:
     proj = person.get("proj", "unknown")
     unit = person.get("unit", "") or "_no_unit"
@@ -88,19 +150,16 @@ def _build_full_kanban(people: list[dict]) -> list[dict]:
     kanban = []
     for p in people:
         emp_dir = _emp_dir(p)
-        status  = {}
-        periods = set()
+        status, periods = {}, set()
         if emp_dir.exists():
             for item in emp_dir.rglob("*"):
                 if item.is_file():
                     ftype = _detect_type(item.name)
                     if ftype != "other":
                         status[ftype] = True
-                    # collect period folders (2026-P05 etc.)
                     rel = item.relative_to(emp_dir)
-                    parts = rel.parts
-                    if len(parts) >= 2:
-                        periods.add(parts[0])
+                    if len(rel.parts) >= 2:
+                        periods.add(rel.parts[0])
         kanban.append({
             "id":         p["id"],
             "cn":         p.get("cn", ""),
@@ -132,8 +191,8 @@ def get_employee_files(emp_en: str, period: str = "") -> list[dict]:
     emp_dir = _emp_dir(person)
     if not emp_dir.exists():
         return []
-    files = []
     search_dir = emp_dir / period if (period and (emp_dir/period).exists()) else emp_dir
+    files = []
     for f in sorted(search_dir.rglob("*")):
         if f.is_file():
             ext = f.suffix.lower().lstrip(".")
@@ -145,5 +204,20 @@ def get_employee_files(emp_en: str, period: str = "") -> list[dict]:
                 "ftype":   _detect_type(f.name),
                 "period":  rel.parts[0] if len(rel.parts) > 1 else "",
                 "size":    f.stat().st_size,
+            })
+    return files
+
+
+def get_inbox_files() -> list[dict]:
+    """Return all files currently in Inbox (unscanned)."""
+    files = []
+    for f in sorted(INBOX_DIR.rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(INBOX_DIR)
+            files.append({
+                "name":        f.name,
+                "inbox_path":  str(f),
+                "folder":      rel.parts[0] if len(rel.parts) > 1 else "",
+                "size":        f.stat().st_size,
             })
     return files
