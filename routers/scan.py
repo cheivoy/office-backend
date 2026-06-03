@@ -19,41 +19,59 @@ async def scan(period: str = Form("")):
 @router.post("/import-files")
 async def import_files(files: list[UploadFile] = File(...)):
     """
-    Save files to Inbox, preserving subfolder structure from browser upload.
-    f.filename may include relative path like 'WIPRO P05/file.xlsx'.
-    Parent folders are created automatically. Duplicates are skipped.
+    Save files to Inbox.
+    Returns duplicates list so frontend can ask user for confirmation.
+    Uses PurePosixPath to safely handle subfolders from folder upload.
     """
     from pathlib import PurePosixPath
     from services.scan_svc import _safe_dest
-    saved, skipped = [], []
+
+    saved, skipped, duplicates = [], [], []
+
     for f in files:
-        # Parse relative path safely (no absolute path escape)
-        rel = PurePosixPath(f.filename)
+        rel  = PurePosixPath(f.filename)
         dest = INBOX_DIR.joinpath(*rel.parts)
         file_bytes = await f.read()
 
-        # Skip duplicate: same filename anywhere in dest folder + same size
-        same_name = dest.parent / dest.name if dest.parent.exists() else None
-        if same_name and same_name.exists() and same_name.stat().st_size == len(file_bytes):
+        # Check duplicate by filename only (ignore path prefix)
+        if dest.exists():
+            duplicates.append({
+                "filename":   f.filename,
+                "inbox_path": str(dest),
+                "size_match": dest.stat().st_size == len(file_bytes),
+            })
             skipped.append(f.filename)
             continue
 
-        # Create parent dirs (preserves folder structure in Inbox)
         dest.parent.mkdir(parents=True, exist_ok=True)
-
-        # Avoid overwrite if different content
-        if dest.exists():
-            dest = _safe_dest(dest)
-
         dest.write_bytes(file_bytes)
         saved.append(str(dest.relative_to(INBOX_DIR)))
 
-    return {"saved": saved, "skipped": skipped, "count": len(saved)}
+    return {
+        "saved":      saved,
+        "skipped":    skipped,
+        "duplicates": duplicates,
+        "count":      len(saved),
+    }
+
+
+@router.post("/import-files-force")
+async def import_files_force(files: list[UploadFile] = File(...)):
+    """Force import, overwriting existing files."""
+    from pathlib import PurePosixPath
+    saved = []
+    for f in files:
+        rel  = PurePosixPath(f.filename)
+        dest = INBOX_DIR.joinpath(*rel.parts)
+        file_bytes = await f.read()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(file_bytes)
+        saved.append(str(dest.relative_to(INBOX_DIR)))
+    return {"saved": saved, "count": len(saved)}
 
 
 @router.get("/inbox-files")
 def inbox_files():
-    """List all files currently in Inbox waiting to be scanned."""
     return {"files": get_inbox_files()}
 
 
@@ -63,7 +81,6 @@ async def manual_assign(
     emp_name:   str = Form(...),
     period:     str = Form(""),
 ):
-    """Manually assign an unmatched Inbox file to an employee."""
     try:
         result = assign_manual(inbox_path, emp_name, period)
         return result
@@ -78,7 +95,6 @@ def employee_files(emp_en: str, period: str = ""):
 
 @router.get("/periods")
 def get_periods():
-    """Return all year-period folders found (e.g. 2026-P05)."""
     from config import DEPT_DIR
     periods = set()
     if DEPT_DIR.exists():
@@ -86,9 +102,3 @@ def get_periods():
             if p.is_dir() and "-P" in p.name and p.name[:2].isdigit():
                 periods.add(p.name)
     return {"periods": sorted(periods)}
-
-
-@router.get("/people")
-def list_people_for_assign():
-    """Quick list for manual assign dropdown."""
-    return [{"en": p["en"], "cn": p.get("cn","")} for p in get_all()]
