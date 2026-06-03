@@ -95,12 +95,15 @@ def scan_and_classify(period: str = "") -> dict:
         shutil.move(str(fpath), str(dest))
 
         results["moved"].append({
-            "file":   fpath.name,
-            "emp":    matched["en"],
-            "type":   _detect_type(fpath.name),
-            "period": period,
-            "dest":   str(dest.relative_to(DEPT_DIR)),
-            "method": "name" if _match_by_name(fpath.name, people) else "folder",
+            "file":      fpath.name,
+            "emp_en":    matched["en"],
+            "emp_cn":    matched.get("cn",""),
+            "proj":      matched.get("proj",""),
+            "unit":      matched.get("unit",""),
+            "type":      _detect_type(fpath.name),
+            "period":    period,
+            "dest":      str(dest.relative_to(DEPT_DIR)),
+            "method":    "name" if _match_by_name(fpath.name, people) else "folder",
         })
 
     # Clean up empty Inbox subfolders

@@ -56,3 +56,93 @@ def download_all_zip():
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/zip",
                              headers={"Content-Disposition": "attachment; filename=all_departments.zip"})
+
+
+@router.delete("/delete-file/{emp_en}/{file_path:path}")
+def delete_file(emp_en: str, file_path: str):
+    """Delete a single file from an employee's folder."""
+    from services.people_svc import find_by_name
+    from services.scan_svc import _emp_dir
+    person = find_by_name(emp_en)
+    if not person:
+        raise HTTPException(404, "Employee not found")
+    path = _emp_dir(person) / file_path
+    if not path.exists():
+        raise HTTPException(404, "File not found")
+    path.unlink()
+    # Remove empty parent dirs up to emp_dir
+    emp_dir = _emp_dir(person)
+    parent = path.parent
+    while parent != emp_dir and parent.exists():
+        try:
+            parent.rmdir()  # only removes if empty
+            parent = parent.parent
+        except OSError:
+            break
+    return {"deleted": file_path}
+
+
+@router.post("/move-file")
+async def move_file(
+    emp_en:      str = Form(...),
+    file_path:   str = Form(...),   # relative path under emp dir
+    target_emp:  str = Form(...),   # destination employee en name
+    target_period: str = Form(""),  # optional period folder
+    copy:        bool = Form(False),# True = copy, False = move
+):
+    """Move or copy a file from one employee folder to another."""
+    from services.people_svc import find_by_name
+    from services.scan_svc import _emp_dir, _safe_dest
+    import shutil
+
+    src_person = find_by_name(emp_en)
+    dst_person  = find_by_name(target_emp)
+    if not src_person: raise HTTPException(404, f"Source employee '{emp_en}' not found")
+    if not dst_person:  raise HTTPException(404, f"Target employee '{target_emp}' not found")
+
+    src_path = _emp_dir(src_person) / file_path
+    if not src_path.exists(): raise HTTPException(404, "Source file not found")
+
+    dst_dir = _emp_dir(dst_person) / target_period if target_period else _emp_dir(dst_person)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst_path = _safe_dest(dst_dir / src_path.name)
+
+    if copy:
+        shutil.copy2(str(src_path), str(dst_path))
+    else:
+        shutil.move(str(src_path), str(dst_path))
+
+    return {
+        "action":  "copy" if copy else "move",
+        "from":    str(src_path.relative_to(DEPT_DIR)),
+        "to":      str(dst_path.relative_to(DEPT_DIR)),
+    }
+
+
+@router.post("/upload-to-employee")
+async def upload_to_employee(
+    emp_en:  str = Form(...),
+    period:  str = Form(""),
+    files:   list[UploadFile] = File(...),
+):
+    """Directly upload files to a specific employee folder (skips Inbox)."""
+    from services.people_svc import find_by_name
+    from services.scan_svc import _emp_dir, _safe_dest, _detect_type
+    person = find_by_name(emp_en)
+    if not person: raise HTTPException(404, f"Employee '{emp_en}' not found")
+
+    emp_dir = _emp_dir(person)
+    dest_dir = emp_dir / period if period else emp_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    for f in files:
+        dest = _safe_dest(dest_dir / f.filename)
+        content = await f.read()
+        dest.write_bytes(content)
+        saved.append({
+            "name":  dest.name,
+            "ftype": _detect_type(dest.name),
+            "path":  str(dest.relative_to(emp_dir)),
+        })
+    return {"saved": saved, "count": len(saved)}
