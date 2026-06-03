@@ -105,6 +105,7 @@ async def move_file(
     """Move or copy a file from one employee folder to another."""
     from services.people_svc import find_by_name
     from services.scan_svc import _emp_dir, _safe_dest
+    from config import DEPT_DIR
     import shutil
 
     src_person = find_by_name(emp_en)
