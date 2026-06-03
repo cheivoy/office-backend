@@ -12,18 +12,17 @@ def _detect_type(filename: str) -> str:
     return "other"
 
 
-def scan_and_classify() -> dict:
+def scan_and_classify(period: str = "") -> dict:
     """
-    Scan Inbox/, match each file to an employee, move to
-    Departments/<proj>/<unit>/<pm>/<emp_en>/<file>.
-    Returns kanban data: {emp_id: {file_type: bool}}.
+    Scan Inbox/, match files to employees, move to:
+      Departments/<proj>/<unit>/<pm>/<emp_en>/<period>/   if period given
+      Departments/<proj>/<unit>/<pm>/<emp_en>/             otherwise
+    period: e.g. "2026-P05"
     """
-    results = {"moved": [], "unmatched": [], "kanban": {}}
+    results = {"moved": [], "unmatched": [], "kanban": []}
+    people  = get_all()
 
-    inbox_files = list(INBOX_DIR.iterdir())
-    people = get_all()
-
-    for fpath in inbox_files:
+    for fpath in list(INBOX_DIR.iterdir()):
         if not fpath.is_file():
             continue
         matched = _match_person(fpath.name, people)
@@ -31,52 +30,43 @@ def scan_and_classify() -> dict:
             results["unmatched"].append(fpath.name)
             continue
 
-        dest_dir = _emp_dir(matched)
+        base_dir = _emp_dir(matched)
+        dest_dir = base_dir / period if period else base_dir
         dest_dir.mkdir(parents=True, exist_ok=True)
+
         dest = dest_dir / fpath.name
-        # avoid overwrite: append suffix if exists
         if dest.exists():
             dest = dest_dir / (fpath.stem + "_dup" + fpath.suffix)
         shutil.move(str(fpath), str(dest))
 
-        ftype = _detect_type(fpath.name)
-        eid = matched["id"]
-        if eid not in results["kanban"]:
-            results["kanban"][eid] = {}
-        results["kanban"][eid][ftype] = True
         results["moved"].append({
-            "file": fpath.name,
-            "emp": matched["en"],
-            "type": ftype,
-            "dest": str(dest.relative_to(DEPT_DIR)),
+            "file":   fpath.name,
+            "emp":    matched["en"],
+            "type":   _detect_type(fpath.name),
+            "period": period,
+            "dest":   str(dest.relative_to(DEPT_DIR)),
         })
 
-    # Build full kanban with all employees
-    full_kanban = _build_full_kanban(people, results["kanban"])
-    results["kanban"] = full_kanban
+    results["kanban"] = _build_full_kanban(people)
     return results
 
 
 def _match_person(filename: str, people: list[dict]) -> dict | None:
     fn = filename.lower().replace("_", " ").replace("-", " ")
-    best = None
-    best_score = 0
+    best, best_score = None, 0
     for p in people:
         score = 0
         en = p.get("en", "").lower()
         cn = p.get("cn", "")
-        # full English name
         if en and en in fn:
             score = len(en)
-        # parts of English name
         elif en:
             parts = [x for x in en.split() if len(x) > 2]
-            matched_parts = sum(1 for x in parts if x in fn)
-            if matched_parts == len(parts) and len(parts) > 0:
+            matched = sum(1 for x in parts if x in fn)
+            if matched == len(parts) and len(parts) > 0:
                 score = len(en) * 0.8
-            elif matched_parts > 0:
-                score = matched_parts * 3
-        # Chinese name
+            elif matched > 0:
+                score = matched * 3
         if cn and cn in filename:
             score = max(score, len(cn) * 2)
         if score > best_score:
@@ -88,32 +78,38 @@ def _match_person(filename: str, people: list[dict]) -> dict | None:
 def _emp_dir(person: dict) -> Path:
     proj = person.get("proj", "unknown")
     unit = person.get("unit", "") or "_no_unit"
-    pm   = person.get("pm", "")  or "_no_pm"
-    en   = person.get("en", "unknown").replace(" ", "_")
+    pm   = person.get("pm",   "") or "_no_pm"
+    en   = person.get("en",   "unknown").replace(" ", "_")
     return DEPT_DIR / proj / unit / pm / en
 
 
-def _build_full_kanban(people: list[dict], moved_map: dict) -> list[dict]:
-    from pathlib import Path
+def _build_full_kanban(people: list[dict]) -> list[dict]:
+    import datetime
     kanban = []
     for p in people:
-        eid = p["id"]
         emp_dir = _emp_dir(p)
-        status = {}
+        status  = {}
+        periods = set()
         if emp_dir.exists():
-            for fpath in emp_dir.iterdir():
-                if fpath.is_file():
-                    ftype = _detect_type(fpath.name)
+            for item in emp_dir.rglob("*"):
+                if item.is_file():
+                    ftype = _detect_type(item.name)
                     if ftype != "other":
                         status[ftype] = True
+                    # collect period folders (2026-P05 etc.)
+                    rel = item.relative_to(emp_dir)
+                    parts = rel.parts
+                    if len(parts) >= 2:
+                        periods.add(parts[0])
         kanban.append({
-            "id":         eid,
+            "id":         p["id"],
             "cn":         p.get("cn", ""),
             "en":         p.get("en", ""),
             "proj":       p.get("proj", ""),
             "unit":       p.get("unit", ""),
             "pm":         p.get("pm", ""),
             "status":     status,
+            "periods":    sorted(periods),
             "uploadDate": _latest_date(emp_dir),
         })
     return kanban
@@ -123,17 +119,13 @@ def _latest_date(emp_dir: Path) -> str:
     import datetime
     if not emp_dir.exists():
         return ""
-    dates = []
-    for f in emp_dir.iterdir():
-        if f.is_file():
-            dates.append(f.stat().st_mtime)
+    dates = [f.stat().st_mtime for f in emp_dir.rglob("*") if f.is_file()]
     if not dates:
         return ""
-    ts = max(dates)
-    return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    return datetime.datetime.fromtimestamp(max(dates)).strftime("%Y-%m-%d")
 
 
-def get_employee_files(emp_en: str) -> list[dict]:
+def get_employee_files(emp_en: str, period: str = "") -> list[dict]:
     person = find_by_name(emp_en)
     if not person:
         return []
@@ -141,13 +133,17 @@ def get_employee_files(emp_en: str) -> list[dict]:
     if not emp_dir.exists():
         return []
     files = []
-    for f in sorted(emp_dir.iterdir()):
+    search_dir = emp_dir / period if (period and (emp_dir/period).exists()) else emp_dir
+    for f in sorted(search_dir.rglob("*")):
         if f.is_file():
             ext = f.suffix.lower().lstrip(".")
+            rel = f.relative_to(emp_dir)
             files.append({
-                "name": f.name,
-                "type": ext if ext in ("pdf", "xlsx", "eml") else "other",
-                "size": f.stat().st_size,
-                "ftype": _detect_type(f.name),
+                "name":    f.name,
+                "path":    str(rel),
+                "type":    ext if ext in ("pdf", "xlsx", "eml") else "other",
+                "ftype":   _detect_type(f.name),
+                "period":  rel.parts[0] if len(rel.parts) > 1 else "",
+                "size":    f.stat().st_size,
             })
     return files
