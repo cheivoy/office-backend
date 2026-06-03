@@ -18,20 +18,35 @@ async def scan(period: str = Form("")):
 
 @router.post("/import-files")
 async def import_files(files: list[UploadFile] = File(...)):
-    """Save files to Inbox. Skip if same name + same size already exists."""
+    """
+    Save files to Inbox, preserving subfolder structure from browser upload.
+    f.filename may include relative path like 'WIPRO P05/file.xlsx'.
+    Parent folders are created automatically. Duplicates are skipped.
+    """
+    from pathlib import PurePosixPath
+    from services.scan_svc import _safe_dest
     saved, skipped = [], []
     for f in files:
-        dest = INBOX_DIR / f.filename
-        content = await f.read()
-        if dest.exists() and dest.stat().st_size == len(content):
+        # Parse relative path safely (no absolute path escape)
+        rel = PurePosixPath(f.filename)
+        dest = INBOX_DIR.joinpath(*rel.parts)
+        file_bytes = await f.read()
+
+        # Skip exact duplicate (same path + same size)
+        if dest.exists() and dest.stat().st_size == len(file_bytes):
             skipped.append(f.filename)
             continue
-        # If exists but different size, use safe name
+
+        # Create parent dirs (preserves folder structure in Inbox)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        # Avoid overwrite if different content
         if dest.exists():
-            from services.scan_svc import _safe_dest
             dest = _safe_dest(dest)
-        dest.write_bytes(content)
-        saved.append(dest.name)
+
+        dest.write_bytes(file_bytes)
+        saved.append(str(dest.relative_to(INBOX_DIR)))
+
     return {"saved": saved, "skipped": skipped, "count": len(saved)}
 
 
