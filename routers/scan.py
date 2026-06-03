@@ -102,3 +102,54 @@ def get_periods():
             if p.is_dir() and "-P" in p.name and p.name[:2].isdigit():
                 periods.add(p.name)
     return {"periods": sorted(periods)}
+
+
+@router.delete("/clear-inbox")
+def clear_inbox():
+    """Delete all files in Inbox/."""
+    import shutil
+    count = 0
+    for f in INBOX_DIR.rglob("*"):
+        if f.is_file():
+            f.unlink()
+            count += 1
+    # Remove empty subdirs
+    for d in sorted(INBOX_DIR.rglob("*"), reverse=True):
+        if d.is_dir():
+            try: d.rmdir()
+            except: pass
+    return {"deleted": count, "location": "Inbox"}
+
+
+@router.delete("/clear-departments")
+def clear_departments():
+    """Delete all classified files in Departments/."""
+    import shutil
+    from config import DEPT_DIR
+    count = 0
+    for f in DEPT_DIR.rglob("*"):
+        if f.is_file():
+            f.unlink()
+            count += 1
+    # Remove empty subdirs
+    for d in sorted(DEPT_DIR.rglob("*"), reverse=True):
+        if d.is_dir():
+            try: d.rmdir()
+            except: pass
+    return {"deleted": count, "location": "Departments"}
+
+
+@router.delete("/clear-all")
+def clear_all():
+    """Clear both Inbox and Departments."""
+    from config import DEPT_DIR
+    count = 0
+    for f in INBOX_DIR.rglob("*"):
+        if f.is_file(): f.unlink(); count += 1
+    for f in DEPT_DIR.rglob("*"):
+        if f.is_file(): f.unlink(); count += 1
+    for d in sorted(list(INBOX_DIR.rglob("*")) + list(DEPT_DIR.rglob("*")), reverse=True):
+        if d.is_dir():
+            try: d.rmdir()
+            except: pass
+    return {"deleted": count}

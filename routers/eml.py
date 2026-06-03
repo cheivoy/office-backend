@@ -7,25 +7,25 @@ from services.people_svc import find_by_name
 router = APIRouter()
 
 
-@router.get("/eml/preview/{emp_en}/{filename}")
-def eml_preview(emp_en: str, filename: str):
+@router.get("/eml/preview/{emp_en}/{file_path:path}")
+def eml_preview(emp_en: str, file_path: str):
     """Parse an .eml and return structured JSON for frontend rendering."""
     person = find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
-    raw = get_eml_bytes(_emp_dir(person), filename)
+    raw = get_eml_bytes(_emp_dir(person), file_path)
     if raw is None:
         raise HTTPException(404, "EML file not found")
     return JSONResponse(parse_eml(raw))
 
 
-@router.get("/eml/attachment/{emp_en}/{filename}/{attachment_name}")
-def eml_attachment(emp_en: str, filename: str, attachment_name: str):
+@router.get("/eml/attachment/{emp_en}/{file_path:path}/{attachment_name}")
+def eml_attachment(emp_en: str, file_path: str, attachment_name: str):
     """Download a specific attachment from an .eml file."""
     person = find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
-    raw = get_eml_bytes(_emp_dir(person), filename)
+    raw = get_eml_bytes(_emp_dir(person), file_path)
     if raw is None:
         raise HTTPException(404, "EML file not found")
     data = extract_attachment(raw, attachment_name)

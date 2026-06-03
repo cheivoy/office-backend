@@ -9,22 +9,34 @@ from services.people_svc import find_by_name
 router = APIRouter()
 
 
-@router.get("/preview-file/{emp_en}/{filename}")
-def preview_file(emp_en: str, filename: str):
+@router.get("/preview-file/{emp_en}/{file_path:path}")
+def preview_file(emp_en: str, file_path: str):
     person = find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
-    path = _emp_dir(person) / filename
+    emp_dir = _emp_dir(person)
+    # Try exact relative path first
+    path = emp_dir / file_path
     if not path.exists():
-        raise HTTPException(404, "File not found")
+        # Fallback: search by filename anywhere under emp_dir
+        fname = Path(file_path).name
+        matches = list(emp_dir.rglob(fname))
+        if matches:
+            path = matches[0]
+    if not path.exists():
+        raise HTTPException(404, f"File not found: {file_path}")
     suffix = path.suffix.lower()
     media = {
         ".pdf":  "application/pdf",
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls":  "application/vnd.ms-excel",
         ".eml":  "message/rfc822",
+        ".msg":  "application/vnd.ms-outlook",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png":  "image/png",
     }.get(suffix, "application/octet-stream")
-    return FileResponse(str(path), media_type=media, filename=filename)
-
+    return FileResponse(str(path), media_type=media, filename=path.name)
 
 @router.get("/download-zip/{emp_en}")
 def download_zip(emp_en: str):
@@ -61,26 +73,26 @@ def download_all_zip():
 @router.delete("/delete-file/{emp_en}/{file_path:path}")
 def delete_file(emp_en: str, file_path: str):
     """Delete a single file from an employee's folder."""
-    from services.people_svc import find_by_name
-    from services.scan_svc import _emp_dir
     person = find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
-    path = _emp_dir(person) / file_path
+    emp_dir = _emp_dir(person)
+    path = emp_dir / file_path
     if not path.exists():
-        raise HTTPException(404, "File not found")
+        # Fallback: search by filename
+        fname = Path(file_path).name
+        matches = list(emp_dir.rglob(fname))
+        if matches:
+            path = matches[0]
+    if not path.exists():
+        raise HTTPException(404, f"File not found: {file_path}")
     path.unlink()
     # Remove empty parent dirs up to emp_dir
-    emp_dir = _emp_dir(person)
     parent = path.parent
     while parent != emp_dir and parent.exists():
-        try:
-            parent.rmdir()  # only removes if empty
-            parent = parent.parent
-        except OSError:
-            break
+        try: parent.rmdir(); parent = parent.parent
+        except OSError: break
     return {"deleted": file_path}
-
 
 @router.post("/move-file")
 async def move_file(
@@ -88,7 +100,7 @@ async def move_file(
     file_path:   str = Form(...),   # relative path under emp dir
     target_emp:  str = Form(...),   # destination employee en name
     target_period: str = Form(""),  # optional period folder
-    copy:        bool = Form(False),# True = copy, False = move
+    do_copy:     bool = Form(False),# True = copy, False = move
 ):
     """Move or copy a file from one employee folder to another."""
     from services.people_svc import find_by_name
@@ -100,20 +112,26 @@ async def move_file(
     if not src_person: raise HTTPException(404, f"Source employee '{emp_en}' not found")
     if not dst_person:  raise HTTPException(404, f"Target employee '{target_emp}' not found")
 
-    src_path = _emp_dir(src_person) / file_path
+    src_emp_dir = _emp_dir(src_person)
+    src_path = src_emp_dir / file_path
+    if not src_path.exists():
+        fname = Path(file_path).name
+        matches = list(src_emp_dir.rglob(fname))
+        if matches:
+            src_path = matches[0]
     if not src_path.exists(): raise HTTPException(404, "Source file not found")
 
     dst_dir = _emp_dir(dst_person) / target_period if target_period else _emp_dir(dst_person)
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst_path = _safe_dest(dst_dir / src_path.name)
 
-    if copy:
+    if do_copy:
         shutil.copy2(str(src_path), str(dst_path))
     else:
         shutil.move(str(src_path), str(dst_path))
 
     return {
-        "action":  "copy" if copy else "move",
+        "action":  "copy" if do_copy else "move",
         "from":    str(src_path.relative_to(DEPT_DIR)),
         "to":      str(dst_path.relative_to(DEPT_DIR)),
     }

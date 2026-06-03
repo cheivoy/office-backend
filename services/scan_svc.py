@@ -26,28 +26,47 @@ def _safe_dest(dest: Path) -> Path:
 
 
 def _match_by_name(filename: str, people: list[dict]) -> dict | None:
-    """Match employee by Chinese or English name in filename."""
-    fn = filename.lower().replace("_", " ").replace("-", " ")
+    """
+    Match employee by name in filename.
+    Rules (strict to avoid false positives):
+    - Chinese name: ALL characters must appear as a substring (全名必須完整出現)
+    - English name: ALL parts (first + last) must appear in filename
+    - Single surname like 'Chen' alone does NOT count
+    """
+    fn = filename.lower().replace("_", " ").replace("-", " ").replace("(", " ").replace(")", " ")
     best, best_score = None, 0
+
     for p in people:
         score = 0
         en = p.get("en", "").lower()
         cn = p.get("cn", "")
+
+        # English: full name exact match scores highest
         if en and en in fn:
-            score = len(en)
+            score = len(en) * 3
+
+        # English: ALL parts must be present (requires both first AND last name)
         elif en:
-            parts = [x for x in en.split() if len(x) > 2]
-            matched = sum(1 for x in parts if x in fn)
-            if matched == len(parts) and len(parts) > 0:
-                score = len(en) * 0.8
-            elif matched > 0:
-                score = matched * 3
-        if cn and cn in filename:
-            score = max(score, len(cn) * 2)
+            parts = [x for x in en.split() if len(x) > 1]
+            if len(parts) >= 2:
+                # All parts must match - prevents single surname matching
+                if all(part in fn for part in parts):
+                    score = len(en) * 2
+            # Single-part name (e.g. "Sally") - full match required
+            elif len(parts) == 1 and parts[0] in fn:
+                score = len(parts[0]) * 2
+
+        # Chinese: full name must appear as complete substring
+        # (prevents single char like '陳' matching multiple people)
+        if cn and len(cn) >= 2 and cn in filename:
+            score = max(score, len(cn) * 3)
+
         if score > best_score:
             best_score = score
             best = p
-    return best if best_score >= 3 else None
+
+    # Minimum score threshold: prevents weak matches
+    return best if best_score >= 4 else None
 
 
 def _match_by_folder(folder_name: str, people: list[dict]) -> dict | None:

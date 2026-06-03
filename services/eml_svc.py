@@ -57,8 +57,13 @@ def extract_attachment(eml_bytes: bytes, filename: str) -> bytes | None:
     return None
 
 
-def get_eml_bytes(emp_dir: Path, eml_filename: str) -> bytes | None:
-    path = emp_dir / eml_filename
+def get_eml_bytes(emp_dir: Path, eml_path: str) -> bytes | None:
+    path = emp_dir / eml_path
+    if not path.exists():
+        # fallback: search recursively by filename
+        name = Path(eml_path).name
+        matches = list(emp_dir.rglob(name))
+        path = matches[0] if matches else path
     if path.exists() and path.suffix.lower() == ".eml":
         return path.read_bytes()
     return None
