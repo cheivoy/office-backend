@@ -135,7 +135,7 @@ def write_cht(template_bytes: bytes, payload: SubmitPayload) -> bytes:
         _write("ot", _fmt_ot(payload.ot))
 
     ess_total = sum(e.amount or 0 for e in payload.ess)
-    ns_total  = sum(e.ns_amount or 0 for e in payload.ess)
+    ns_total  = sum(e.amount or 0 for e in (payload.ns or []))
     ta_total  = sum(t.amount or 0 for t in payload.ta)
 
     if ess_total:

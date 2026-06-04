@@ -101,7 +101,7 @@ def batch_write_wipro(template_bytes: bytes, sheet_name: str,
         if not f:
             continue
         ess_total   = sum(float(e.get("amount") or 0) for e in f.get("ess", []))
-        shift_total = sum(float(e.get("ns_amount") or 0) for e in f.get("ess", []))
+        shift_total = sum(float(e.get("amount") or 0) for e in f.get("ns", []))
         ta_total    = sum(float(t.get("amount") or 0) for t in f.get("ta", []))
         ot_entries  = [OtEntry(**o) for o in f.get("ot", [])]
         try:
@@ -148,14 +148,17 @@ def batch_write_nokia_cost(template_bytes: bytes, sheet_name: str,
             continue
         ta_rows  = f.get("ta", [])
         ess_rows = f.get("ess", [])
+        ns_rows  = f.get("ns", [])
 
         def fmt_dates(rows, key="from_date"):
             return "  ".join(r.get(key, "").replace("-", "")[4:] for r in rows if r.get(key))
 
         ta_dates  = fmt_dates(ta_rows, "from_date")
+        # NS now lives in its own array keyed by single `date`
         ns_dates  = "  ".join(r.get("date", "")[5:].replace("-", "")
-                              for r in ess_rows if float(r.get("ns_amount") or 0) > 0)
-        ess_dates = "  ".join(r.get("date", "")[5:].replace("-", "") for r in ess_rows)
+                              for r in ns_rows if r.get("date"))
+        # ESS uses a date range (from_date) now
+        ess_dates = fmt_dates(ess_rows, "from_date")
 
         try:
             template_bytes = write_nokia_report(
@@ -164,7 +167,7 @@ def batch_write_nokia_cost(template_bytes: bytes, sheet_name: str,
                 ta_dates=ta_dates or None,
                 ta_amount=sum(float(t.get("amount") or 0) for t in ta_rows) or None,
                 ns_dates=ns_dates or None,
-                ns_amount=sum(float(e.get("ns_amount") or 0) for e in ess_rows) or None,
+                ns_amount=sum(float(e.get("amount") or 0) for e in ns_rows) or None,
                 ess_dates=ess_dates or None,
                 ess_amount=sum(float(e.get("amount") or 0) for e in ess_rows) or None,
                 sheet_name=sheet_name or None,
@@ -175,12 +178,13 @@ def batch_write_nokia_cost(template_bytes: bytes, sheet_name: str,
 
 
 def _build_payload(emp: dict, f: dict, write_target: str = "cht_nokia") -> SubmitPayload:
-    from models.schemas import EssEntry, OtEntry, TaEntry, LeaveEntry
+    from models.schemas import EssEntry, NsEntry, OtEntry, TaEntry, LeaveEntry
     return SubmitPayload(
         emp_name=emp.get("cn") or emp["en"],
         emp_en=emp["en"],
         work_days=float(f.get("workdays") or 0) or None,
         ess=[EssEntry(**e) for e in f.get("ess", [])],
+        ns=[NsEntry(**n) for n in f.get("ns", [])],
         ot=[OtEntry(**o) for o in f.get("ot", [])],
         ta=[TaEntry(**t) for t in f.get("ta", [])],
         leave=[LeaveEntry(**lv) for lv in f.get("leave", [])],

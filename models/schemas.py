@@ -10,12 +10,22 @@ class Person(BaseModel):
     en:    str
 
 class EssEntry(BaseModel):
-    date:      str
-    tstart:    str
-    tend:      str
-    hours:     Optional[float] = None
+    from_date: str = ""
+    to_date:   str = ""
     amount:    Optional[float] = None
+    # Legacy fields kept for backward compatibility with old saved data
+    date:      Optional[str] = None
+    tstart:    Optional[str] = None
+    tend:      Optional[str] = None
+    hours:     Optional[float] = None
     ns_amount: Optional[float] = None
+
+class NsEntry(BaseModel):
+    date:   str
+    tstart: str = ""
+    tend:   str = ""
+    hours:  Optional[float] = None
+    amount: Optional[float] = None
 
 class OtEntry(BaseModel):
     date:   str
@@ -45,6 +55,7 @@ class SubmitPayload(BaseModel):
     emp_en:      str
     work_days:   Optional[float] = None
     ess:         list[EssEntry] = []
+    ns:          list[NsEntry] = []
     ot:          list[OtEntry]  = []
     ta:          list[TaEntry]  = []
     leave:       list[LeaveEntry] = []
