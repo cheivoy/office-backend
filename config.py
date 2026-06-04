@@ -96,3 +96,7 @@ CHT_NOKIA_PM_FILES = {
 
 # DK template
 CHT_DK_TEMPLATE = "MN_CHT_工時紀錄表_template.xlsx"
+
+# Sync data paths
+FORMS_JSON    = BASE_DIR / "data" / "forms.json"
+PROGRESS_JSON = BASE_DIR / "data" / "progress.json"

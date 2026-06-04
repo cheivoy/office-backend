@@ -29,44 +29,72 @@ def _match_by_name(filename: str, people: list[dict]) -> dict | None:
     """
     Match employee by name in filename.
     Rules (strict to avoid false positives):
-    - Chinese name: ALL characters must appear as a substring (全名必須完整出現)
-    - English name: ALL parts (first + last) must appear in filename
-    - Single surname like 'Chen' alone does NOT count
+    - Chinese name (>=2 chars): FULL name must appear as a complete substring.
+      Prevents partial character like '陳' matching multiple people.
+    - English name: BOTH first AND last name parts must appear in filename.
+      Single surname like 'Chen' alone does NOT count.
+    - Minimum score threshold prevents weak matches.
+    - If multiple candidates score equally, return None to avoid wrong match.
     """
-    fn = filename.lower().replace("_", " ").replace("-", " ").replace("(", " ").replace(")", " ")
-    best, best_score = None, 0
+    fn_raw = filename  # keep for Chinese matching (case-sensitive)
+    fn = filename.lower().replace("_", " ").replace("-", " ").replace(".", " ").replace("(", " ").replace(")", " ")
+    candidates = []
 
     for p in people:
         score = 0
-        en = p.get("en", "").lower()
-        cn = p.get("cn", "")
+        en = p.get("en", "").strip()
+        cn = p.get("cn", "").strip()
 
-        # English: full name exact match scores highest
-        if en and en in fn:
-            score = len(en) * 3
+        # --- Chinese name matching (highest priority) ---
+        # Full Chinese name must appear as exact substring
+        if cn and len(cn) >= 2:
+            if cn in fn_raw:
+                score = len(cn) * 10  # highest weight for Chinese full match
 
-        # English: ALL parts must be present (requires both first AND last name)
-        elif en:
-            parts = [x for x in en.split() if len(x) > 1]
-            if len(parts) >= 2:
-                # All parts must match - prevents single surname matching
-                if all(part in fn for part in parts):
-                    score = len(en) * 2
-            # Single-part name (e.g. "Sally") - full match required
-            elif len(parts) == 1 and parts[0] in fn:
-                score = len(parts[0]) * 2
+        # --- English name matching ---
+        if en and score == 0:  # only if Chinese didn't already match
+            en_lower = en.lower()
+            fn_parts = fn.split()
 
-        # Chinese: full name must appear as complete substring
-        # (prevents single char like '陳' matching multiple people)
-        if cn and len(cn) >= 2 and cn in filename:
-            score = max(score, len(cn) * 3)
+            # Full name exact match (e.g. "johnson chou" in filename)
+            if en_lower in fn:
+                score = len(en_lower) * 5
+            else:
+                # Require BOTH first and last name parts to be present
+                name_parts = [x for x in en_lower.split() if len(x) >= 2]
+                if len(name_parts) >= 2:
+                    # All parts must appear as whole tokens or substrings ≥4 chars
+                    matched_parts = []
+                    for part in name_parts:
+                        if part in fn_parts:  # exact token match
+                            matched_parts.append(part)
+                        elif len(part) >= 4 and part in fn:  # substring match for longer parts
+                            matched_parts.append(part)
+                    if len(matched_parts) == len(name_parts):
+                        score = len(en_lower) * 3
+                    elif len(matched_parts) >= 2:
+                        score = len(en_lower) * 2
+                elif len(name_parts) == 1 and len(name_parts[0]) >= 4:
+                    # Single long name (>=4 chars), exact token match required
+                    if name_parts[0] in fn_parts:
+                        score = len(name_parts[0]) * 3
 
-        if score > best_score:
-            best_score = score
-            best = p
+        if score > 0:
+            candidates.append((score, p))
 
-    # Minimum score threshold: prevents weak matches
-    return best if best_score >= 4 else None
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: -x[0])
+    best_score = candidates[0][0]
+
+    # If multiple employees tie for the same score, cannot safely pick one
+    top = [p for s, p in candidates if s == best_score]
+    if len(top) > 1:
+        return None  # ambiguous match — let it go to unmatched
+
+    # Minimum score threshold prevents weak matches
+    return top[0] if best_score >= 6 else None
 
 
 def _match_by_folder(folder_name: str, people: list[dict]) -> dict | None:
@@ -178,7 +206,7 @@ def _build_full_kanban(people: list[dict]) -> list[dict]:
                 if item.is_file():
                     ftype = _detect_type(item.name)
                     if ftype != "other":
-                        status[ftype] = True
+                        status[ftype] = "ok"
                     rel = item.relative_to(emp_dir)
                     if len(rel.parts) >= 2:
                         periods.add(rel.parts[0])

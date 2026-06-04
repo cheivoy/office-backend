@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import scan, files, submit, people, verify, reports, eml, batch
+from routers import scan, files, submit, people, verify, reports, eml, batch, sync
 
 app = FastAPI(title="Office Automation API", version="3.0.0")
 
@@ -22,6 +22,7 @@ app.include_router(verify.router,  prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(eml.router,     prefix="/api")
 app.include_router(batch.router,   prefix="/api")
+app.include_router(sync.router,    prefix="/api")
 
 @app.get("/")
 def root():
