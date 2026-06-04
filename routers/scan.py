@@ -4,8 +4,6 @@ from services.scan_svc import (
     scan_and_classify, get_employee_files,
     get_inbox_files, assign_manual
 )
-from services.people_svc import get_all
-import shutil
 
 router = APIRouter()
 
@@ -24,15 +22,23 @@ async def import_files(files: list[UploadFile] = File(...)):
     Supports both single file and folder (webkitdirectory) uploads.
     """
     from pathlib import PurePosixPath
-    from services.scan_svc import _safe_dest
 
     saved, skipped, duplicates = [], [], []
 
     for f in files:
         # webkitRelativePath is sent as the filename for folder uploads;
         # for single-file uploads it's just the bare filename.
-        rel  = PurePosixPath(f.filename)
-        dest = INBOX_DIR.joinpath(*rel.parts)
+        # 防止路徑穿越（.. / 絕對路徑）：只取安全的相對片段。
+        raw = (f.filename or "").replace("\\", "/")
+        parts = [
+            p for p in PurePosixPath(raw).parts
+            if p not in ("", ".", "..", "/")
+        ]
+        if not parts:
+            skipped.append(f.filename)
+            continue
+
+        dest = INBOX_DIR.joinpath(*parts)
         file_bytes = await f.read()
 
         if dest.exists():
@@ -62,8 +68,14 @@ async def import_files_force(files: list[UploadFile] = File(...)):
     from pathlib import PurePosixPath
     saved = []
     for f in files:
-        rel  = PurePosixPath(f.filename)
-        dest = INBOX_DIR.joinpath(*rel.parts)
+        raw = (f.filename or "").replace("\\", "/")
+        parts = [
+            p for p in PurePosixPath(raw).parts
+            if p not in ("", ".", "..", "/")
+        ]
+        if not parts:
+            continue
+        dest = INBOX_DIR.joinpath(*parts)
         file_bytes = await f.read()
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(file_bytes)
@@ -79,11 +91,13 @@ def inbox_files():
 @router.post("/assign-manual")
 async def manual_assign(
     inbox_path: str = Form(...),
-    emp_name:   str = Form(...),
+    emp_name:   str = Form(""),
+    emp_id:     str = Form(""),
     period:     str = Form(""),
 ):
+    eid = int(emp_id) if emp_id.strip().isdigit() else None
     try:
-        result = assign_manual(inbox_path, emp_name, period)
+        result = assign_manual(inbox_path, emp_name, period, emp_id=eid)
         return result
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(400, str(e))
@@ -108,7 +122,6 @@ def get_periods():
 @router.delete("/clear-inbox")
 def clear_inbox():
     """Delete all files in Inbox/."""
-    import shutil
     count = 0
     for f in INBOX_DIR.rglob("*"):
         if f.is_file():
@@ -124,7 +137,6 @@ def clear_inbox():
 @router.delete("/clear-departments")
 def clear_departments():
     """Delete all classified files in Departments/."""
-    import shutil
     from config import DEPT_DIR
     count = 0
     for f in DEPT_DIR.rglob("*"):

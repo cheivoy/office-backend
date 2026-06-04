@@ -101,15 +101,19 @@ async def move_file(
     target_emp:  str = Form(...),   # destination employee en name
     target_period: str = Form(""),  # optional period folder
     do_copy:     bool = Form(False),# True = copy, False = move
+    emp_id:        str = Form(""),   # optional source id (preferred)
+    target_id:     str = Form(""),   # optional target id (preferred)
 ):
     """Move or copy a file from one employee folder to another."""
-    from services.people_svc import find_by_name
+    from services.people_svc import find_by_name, find_by_id
     from services.scan_svc import _emp_dir, _safe_dest
     from config import DEPT_DIR
     import shutil
 
-    src_person = find_by_name(emp_en)
-    dst_person  = find_by_name(target_emp)
+    src_id = int(emp_id) if emp_id.strip().isdigit() else None
+    dst_id = int(target_id) if target_id.strip().isdigit() else None
+    src_person = find_by_id(src_id) if src_id is not None else find_by_name(emp_en)
+    dst_person = find_by_id(dst_id) if dst_id is not None else find_by_name(target_emp)
     if not src_person: raise HTTPException(404, f"Source employee '{emp_en}' not found")
     if not dst_person:  raise HTTPException(404, f"Target employee '{target_emp}' not found")
 

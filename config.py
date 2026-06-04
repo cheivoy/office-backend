@@ -1,15 +1,34 @@
+import os
 from pathlib import Path
 
-BASE_DIR      = Path(__file__).parent
-INBOX_DIR     = BASE_DIR / "Inbox"
-DEPT_DIR      = BASE_DIR / "Departments"
-PEOPLE_CSV    = BASE_DIR / "data" / "people.json"
+# ─────────────────────────────────────────────────────────────────────────────
+# Persistence root
+# ─────────────────────────────────────────────────────────────────────────────
+# 為了解決 Railway ephemeral storage（容器重啟資料清空）的問題：
+# 所有「會變動的資料」（Inbox / Departments / data）都放在 DATA_ROOT 之下。
+# DATA_ROOT 由環境變數控制，指向 Railway 掛載的持久化 Volume。
+#
+# 設定方式（Railway）：
+#   1. 在 service 設定中新增一個 Volume，Mount path 設為 /data
+#   2. 設定環境變數 DATA_ROOT=/data
+# 本機開發時不設此變數，預設使用專案目錄下的 ./data_root，行為與舊版一致。
+#
+# templates/（固定範本）屬於程式碼的一部分，跟著 git 走，不放 Volume。
+BASE_DIR     = Path(__file__).parent
+DATA_ROOT    = Path(os.environ.get("DATA_ROOT", str(BASE_DIR / "data_root")))
+
+INBOX_DIR     = DATA_ROOT / "Inbox"
+DEPT_DIR      = DATA_ROOT / "Departments"
+DATA_DIR      = DATA_ROOT / "data"
+PEOPLE_CSV    = DATA_DIR / "people.json"
+
+# 固定範本仍跟程式碼一起部署（唯讀），不需持久化
 TEMPLATE_DIR  = BASE_DIR / "templates"
 CHT_NOKIA_DIR = TEMPLATE_DIR / "cht_nokia"
 CHT_DK_DIR    = TEMPLATE_DIR / "cht_dk"
 
-for _d in [INBOX_DIR, DEPT_DIR, BASE_DIR/"data", TEMPLATE_DIR, CHT_NOKIA_DIR, CHT_DK_DIR]:
-    _d.mkdir(exist_ok=True)
+for _d in [INBOX_DIR, DEPT_DIR, DATA_DIR, TEMPLATE_DIR, CHT_NOKIA_DIR, CHT_DK_DIR]:
+    _d.mkdir(parents=True, exist_ok=True)
 
 # File type keywords for classification
 # Order matters: more specific patterns first
@@ -98,5 +117,5 @@ CHT_NOKIA_PM_FILES = {
 CHT_DK_TEMPLATE = "MN_CHT_工時紀錄表_template.xlsx"
 
 # Sync data paths
-FORMS_JSON    = BASE_DIR / "data" / "forms.json"
-PROGRESS_JSON = BASE_DIR / "data" / "progress.json"
+FORMS_JSON    = DATA_DIR / "forms.json"
+PROGRESS_JSON = DATA_DIR / "progress.json"

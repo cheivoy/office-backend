@@ -1,7 +1,7 @@
 import shutil
 from pathlib import Path
 from config import INBOX_DIR, DEPT_DIR, FILE_TYPE_KEYWORDS
-from services.people_svc import get_all, find_by_name
+from services.people_svc import get_all, find_by_name, find_by_id
 
 
 def _detect_type(filename: str) -> str:
@@ -141,6 +141,7 @@ def scan_and_classify(period: str = "") -> dict:
             continue
 
         matched = _match_by_name(fpath.name, people)
+        method = "name"
 
         # Fallback: try folder name
         if not matched:
@@ -148,6 +149,8 @@ def scan_and_classify(period: str = "") -> dict:
             if len(rel.parts) > 1:
                 folder = rel.parts[0]
                 matched = _match_by_folder(folder, people)
+                if matched:
+                    method = "folder"
 
         if not matched:
             results["unmatched"].append({
@@ -165,14 +168,15 @@ def scan_and_classify(period: str = "") -> dict:
 
         results["moved"].append({
             "file":      fpath.name,
+            "emp_id":    matched.get("id"),
             "emp_en":    matched["en"],
-            "emp_cn":    matched.get("cn",""),
-            "proj":      matched.get("proj",""),
-            "unit":      matched.get("unit",""),
+            "emp_cn":    matched.get("cn", ""),
+            "proj":      matched.get("proj", ""),
+            "unit":      matched.get("unit", ""),
             "type":      _detect_type(fpath.name),
             "period":    period,
             "dest":      str(dest.relative_to(DEPT_DIR)),
-            "method":    "name" if _match_by_name(fpath.name, people) else "folder",
+            "method":    method,
         })
 
     # Clean up empty Inbox subfolders
@@ -184,11 +188,19 @@ def scan_and_classify(period: str = "") -> dict:
     return results
 
 
-def assign_manual(inbox_path: str, emp_en: str, period: str = "") -> dict:
-    """Manually assign an unmatched file to an employee."""
-    person = find_by_name(emp_en)
+def assign_manual(inbox_path: str, emp_name: str, period: str = "",
+                  emp_id: int | None = None) -> dict:
+    """Manually assign an unmatched file to an employee.
+
+    優先用 emp_id 精準定位（避免同名/鬆散比對錯置）；
+    沒有 id 時才退回用名字嚴格比對。
+    """
+    if emp_id is not None:
+        person = find_by_id(emp_id, period)
+    else:
+        person = find_by_name(emp_name, period)
     if not person:
-        raise ValueError(f"Employee '{emp_en}' not found")
+        raise ValueError(f"Employee '{emp_name or emp_id}' not found")
 
     src = Path(inbox_path)
     if not src.exists():
@@ -218,7 +230,6 @@ def _emp_dir(person: dict) -> Path:
 
 
 def _build_full_kanban(people: list[dict], active_period: str = "") -> list[dict]:
-    import datetime
     kanban = []
     for p in people:
         emp_dir = _emp_dir(p)
