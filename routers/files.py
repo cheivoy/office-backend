@@ -96,9 +96,9 @@ def delete_file(emp_en: str, file_path: str):
 
 @router.post("/move-file")
 async def move_file(
-    emp_en:      str = Form(...),
     file_path:   str = Form(...),   # relative path under emp dir
-    target_emp:  str = Form(...),   # destination employee en name
+    emp_en:      str = Form(""),    # source employee en name (or use emp_id)
+    target_emp:  str = Form(""),    # destination employee en name (or use target_id)
     target_period: str = Form(""),  # optional period folder
     do_copy:     bool = Form(False),# True = copy, False = move
     emp_id:        str = Form(""),   # optional source id (preferred)
@@ -112,8 +112,10 @@ async def move_file(
 
     src_id = int(emp_id) if emp_id.strip().isdigit() else None
     dst_id = int(target_id) if target_id.strip().isdigit() else None
-    src_person = find_by_id(src_id) if src_id is not None else find_by_name(emp_en)
-    dst_person = find_by_id(dst_id) if dst_id is not None else find_by_name(target_emp)
+    src_person = (find_by_id(src_id) if src_id is not None
+                  else find_by_name(emp_en, target_period) or find_by_name(emp_en))
+    dst_person = (find_by_id(dst_id) if dst_id is not None
+                  else find_by_name(target_emp, target_period) or find_by_name(target_emp))
     if not src_person: raise HTTPException(404, f"Source employee '{emp_en}' not found")
     if not dst_person:  raise HTTPException(404, f"Target employee '{target_emp}' not found")
 
@@ -151,7 +153,8 @@ async def upload_to_employee(
     """Directly upload files to a specific employee folder (skips Inbox)."""
     from services.people_svc import find_by_name
     from services.scan_svc import _emp_dir, _safe_dest, _detect_type
-    person = find_by_name(emp_en)
+    # 先用 period 名單找；找不到再退回全域名單（新人可能只在月份名單裡）
+    person = find_by_name(emp_en, period) or find_by_name(emp_en)
     if not person: raise HTTPException(404, f"Employee '{emp_en}' not found")
 
     emp_dir = _emp_dir(person)

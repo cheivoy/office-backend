@@ -280,7 +280,8 @@ def _latest_date(emp_dir: Path) -> str:
 
 
 def get_employee_files(emp_en: str, period: str = "") -> list[dict]:
-    person = find_by_name(emp_en)
+    # 先用 period 名單找；找不到再退回全域名單
+    person = find_by_name(emp_en, period) or find_by_name(emp_en)
     if not person:
         return []
     emp_dir = _emp_dir(person)
