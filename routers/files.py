@@ -10,8 +10,8 @@ router = APIRouter()
 
 
 @router.get("/preview-file/{emp_en}/{file_path:path}")
-def preview_file(emp_en: str, file_path: str):
-    person = find_by_name(emp_en)
+def preview_file(emp_en: str, file_path: str, period: str = ""):
+    person = find_by_name(emp_en, period) or find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
     emp_dir = _emp_dir(person)
@@ -71,9 +71,9 @@ def download_all_zip():
 
 
 @router.delete("/delete-file/{emp_en}/{file_path:path}")
-def delete_file(emp_en: str, file_path: str):
+def delete_file(emp_en: str, file_path: str, period: str = ""):
     """Delete a single file from an employee's folder."""
-    person = find_by_name(emp_en)
+    person = find_by_name(emp_en, period) or find_by_name(emp_en)
     if not person:
         raise HTTPException(404, "Employee not found")
     emp_dir = _emp_dir(person)
@@ -85,7 +85,8 @@ def delete_file(emp_en: str, file_path: str):
         if matches:
             path = matches[0]
     if not path.exists():
-        raise HTTPException(404, f"File not found: {file_path}")
+        # 檔案已不存在（可能已被刪/移動）→ 視為成功，不要用 404 卡住 UI
+        return {"deleted": file_path, "already_gone": True}
     path.unlink()
     # Remove empty parent dirs up to emp_dir
     parent = path.parent
@@ -166,9 +167,14 @@ async def upload_to_employee(
         dest = _safe_dest(dest_dir / f.filename)
         content = await f.read()
         dest.write_bytes(content)
+        ext = dest.suffix.lower().lstrip(".")
+        rel = dest.relative_to(emp_dir)
         saved.append({
-            "name":  dest.name,
-            "ftype": _detect_type(dest.name),
-            "path":  str(dest.relative_to(emp_dir)),
+            "name":   dest.name,
+            "path":   str(rel),
+            "type":   ext if ext in ("pdf", "xlsx", "eml") else "other",
+            "ftype":  _detect_type(dest.name),
+            "period": rel.parts[0] if len(rel.parts) > 1 else "",
+            "size":   dest.stat().st_size,
         })
     return {"saved": saved, "count": len(saved)}

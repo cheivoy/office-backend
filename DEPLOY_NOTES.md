@@ -26,6 +26,16 @@ DATA_ROOT/
 
 固定範本 `templates/`（CHT Nokia / DK）仍跟程式碼走，不需持久化。
 
+### 部署後務必確認（重要）
+部署完成後打開：
+```
+https://<你的後端網址>/api/health
+```
+- 若 `"persistent": true` → 設定成功，資料不會再因重新部署而消失。
+- 若 `"persistent": false` → **代表還沒設定 Volume**，照上面四步驟做完再重新部署。
+  在這之前，資料每次 redeploy 都會被清空（這就是「為什麼 redeploy 後資料不見」的原因
+  ——程式已支援持久化，但必須在 Railway 掛載 Volume 才會生效）。
+
 ### Railway 設定步驟（只需做一次）
 1. 進入 service → **Volumes** → New Volume
 2. **Mount path** 設為 `/data`
