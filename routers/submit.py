@@ -35,7 +35,9 @@ async def submit_data(
         elif payload.write_target == "wipro_snda":
             # Wipro: pull fields from payload
             ess_total   = sum(e.amount or 0 for e in payload.ess)
-            shift_total = sum(e.ns_amount or 0 for e in payload.ess)
+            # NS moved to its own array; fall back to legacy ess.ns_amount
+            shift_total = (sum(e.amount or 0 for e in (payload.ns or []))
+                           or sum(e.ns_amount or 0 for e in payload.ess))
             ta_total    = sum(t.amount or 0 for t in payload.ta)
             result_bytes = write_wipro(
                 template_bytes,

@@ -25,6 +25,30 @@ class Anomaly:
     note: str = ""
 
 
+def _expand_dates(entry: dict) -> list[str]:
+    """Return list of YYYY-MM-DD dates an entry covers.
+    Supports new range form (from_date/to_date) and legacy single `date`."""
+    from datetime import date, timedelta
+    fd = entry.get("from_date") or entry.get("date") or ""
+    td = entry.get("to_date") or fd
+    fd, td = parse_date(fd), parse_date(td)
+    if not fd:
+        return []
+    if not td or td < fd:
+        td = fd
+    try:
+        y1, m1, d1 = map(int, fd.split("-"))
+        y2, m2, d2 = map(int, td.split("-"))
+        cur, end = date(y1, m1, d1), date(y2, m2, d2)
+    except (ValueError, AttributeError):
+        return [fd]
+    out = []
+    while cur <= end and len(out) < 60:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return out
+
+
 @dataclass
 class VerifyResult:
     emp_en: str
@@ -225,8 +249,10 @@ def verify_ns(
     result.matched_rows = len(rows)
     result.status = "ok"
 
-    # Only check ESS entries that have ns_amount
-    ns_entries = [e for e in tab_ess if float(e.get("ns_amount") or 0) > 0]
+    # NS entries now come from their own array. Support both new (ns[].amount,
+    # any positive) and legacy (ess[].ns_amount > 0) shapes.
+    ns_entries = [e for e in tab_ess
+                  if float(e.get("amount") or 0) > 0 or float(e.get("ns_amount") or 0) > 0]
 
     for tab in ns_entries:
         tab_date  = tab.get("date", "")
@@ -294,9 +320,14 @@ def verify_ess(
     result.matched_rows = len(rota)
     result.status = "ok"
 
+    # Expand each ESS entry's date range into individual days
+    tab_dates = set()
+    for e in tab_ess:
+        for d in _expand_dates(e):
+            tab_dates.add(d)
+
     # Check each ESS date exists in ROTA
-    for tab in tab_ess:
-        tab_date = tab.get("date", "")
+    for tab_date in sorted(tab_dates):
         if tab_date not in rota:
             result.status = "anomaly"
             result.anomalies.append(Anomaly(
@@ -307,7 +338,6 @@ def verify_ess(
             ))
 
     # Sum amount for TAB dates and compare with stated total
-    tab_dates = {e.get("date") for e in tab_ess}
     rota_sum = sum(v for k, v in rota.items() if k in tab_dates)
 
     if tab_ess_total and abs(rota_sum - tab_ess_total) > 1:

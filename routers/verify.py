@@ -98,7 +98,7 @@ async def verify_all(
     if ot_file:
         ob = await ot_file.read()
         results["ot"] = verify_ot(ob, en, cn, tab.get("ot", [])).to_dict()
-        results["ns"] = verify_ns(ob, en, cn, tab.get("ess", [])).to_dict()
+        results["ns"] = verify_ns(ob, en, cn, tab.get("ns", tab.get("ess", []))).to_dict()
 
     if ess_file:
         eb = await ess_file.read()
