@@ -21,7 +21,7 @@ async def import_files(files: list[UploadFile] = File(...)):
     """
     Save files to Inbox.
     Returns duplicates list so frontend can ask user for confirmation.
-    Uses PurePosixPath to safely handle subfolders from folder upload.
+    Supports both single file and folder (webkitdirectory) uploads.
     """
     from pathlib import PurePosixPath
     from services.scan_svc import _safe_dest
@@ -29,11 +29,12 @@ async def import_files(files: list[UploadFile] = File(...)):
     saved, skipped, duplicates = [], [], []
 
     for f in files:
+        # webkitRelativePath is sent as the filename for folder uploads;
+        # for single-file uploads it's just the bare filename.
         rel  = PurePosixPath(f.filename)
         dest = INBOX_DIR.joinpath(*rel.parts)
         file_bytes = await f.read()
 
-        # Check duplicate by filename only (ignore path prefix)
         if dest.exists():
             duplicates.append({
                 "filename":   f.filename,
@@ -113,7 +114,6 @@ def clear_inbox():
         if f.is_file():
             f.unlink()
             count += 1
-    # Remove empty subdirs
     for d in sorted(INBOX_DIR.rglob("*"), reverse=True):
         if d.is_dir():
             try: d.rmdir()
@@ -131,7 +131,6 @@ def clear_departments():
         if f.is_file():
             f.unlink()
             count += 1
-    # Remove empty subdirs
     for d in sorted(DEPT_DIR.rglob("*"), reverse=True):
         if d.is_dir():
             try: d.rmdir()
