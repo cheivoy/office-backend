@@ -98,6 +98,12 @@ def import_from_excel(file_bytes: bytes, period: str = "") -> list[dict]:
         if not row or not row[4]:
             continue
         proj, unit, pm, cn, en = (str(v).strip() if v else "" for v in row[:5])
+        # Skip summary/total rows — these appear when Excel has subtotal rows
+        if unit.lower() in ("total", "subtotal", "合計", "小計", "sum"):
+            continue
+        # Skip rows with no English name (required field)
+        if not en:
+            continue
         imported.append({"proj": proj, "unit": unit, "pm": pm, "cn": cn, "en": en})
 
     if period:
