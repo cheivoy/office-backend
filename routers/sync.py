@@ -24,9 +24,19 @@ def get_all_forms(period: str = ""):
     return sync_svc.get_all_forms(period=period)
 
 
+@router.get("/forms/history/{emp_en}")
+def get_form_history(emp_en: str, before: str = ""):
+    """
+    跨月歷史：回傳該員工 `before` 月份之前的所有 tab 記錄。
+    例：核對 2026-P05 時，呼叫 ?before=2026-P05 取得 P04（及更早）資料做重複偵測。
+    回傳 { period: form, ... }（新到舊）。
+    """
+    return sync_svc.get_form_history(emp_en, before=before)
+
+
 @router.get("/forms/{emp_en}")
-def get_form(emp_en: str):
-    data = sync_svc.get_form(emp_en)
+def get_form(emp_en: str, period: str = ""):
+    data = sync_svc.get_form(emp_en, period=period)
     return data if data is not None else {}
 
 
@@ -51,9 +61,9 @@ async def save_forms_bulk(request: Request):
 
 
 @router.delete("/forms/{emp_en}")
-def delete_form(emp_en: str):
-    deleted = sync_svc.delete_form(emp_en)
-    return {"deleted": deleted, "emp_en": emp_en}
+def delete_form(emp_en: str, period: str = ""):
+    deleted = sync_svc.delete_form(emp_en, period=period)
+    return {"deleted": deleted, "emp_en": emp_en, "period": period}
 
 
 # ── Progress ──────────────────────────────────────────────────────────────────

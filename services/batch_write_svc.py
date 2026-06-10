@@ -24,14 +24,18 @@ def _get_form(forms: dict, emp_en: str) -> dict:
     return {}
 
 
-def batch_write_cht_nokia(period: str, forms: dict[str, dict]) -> bytes:
+def batch_write_cht_nokia(period: str, forms: dict[str, dict]) -> tuple[bytes, dict]:
     """
     Write all CHT Nokia employees into their respective PM files.
-    Returns a zip of all 11 modified PM xlsx files.
+    Returns (zip_bytes, report).
+    report = {written, skipped:[{emp,reason}], pm_files_missing:[...], ...}
     forms: {emp_en: {work_days, ess, ot, ta, leave, ...}}
     """
     people = get_all()
     cht_emps = [p for p in people if p.get("unit") == "CHT" and p.get("pm") != "DK"]
+
+    report = {"target": "cht_nokia", "written": 0, "skipped": [],
+              "pm_files_missing": [], "people_total": len(cht_emps)}
 
     # Group by PM
     pm_groups: dict[str, list[dict]] = {}
@@ -40,65 +44,88 @@ def batch_write_cht_nokia(period: str, forms: dict[str, dict]) -> bytes:
         pm_groups.setdefault(pm, []).append(emp)
 
     buf = BytesIO()
+    any_template = False
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for pm, emps in pm_groups.items():
             tpl_name = CHT_NOKIA_PM_FILES.get(pm)
             tpl_path = CHT_NOKIA_DIR / tpl_name if tpl_name else None
             if not tpl_path or not tpl_path.exists():
+                # Record exactly why this whole PM group produced nothing
+                reason = (f"PM「{pm}」沒有對應範本名稱（config.CHT_NOKIA_PM_FILES）"
+                          if not tpl_name
+                          else f"範本檔不存在：templates/cht_nokia/{tpl_name}")
+                report["pm_files_missing"].append({"pm": pm, "reason": reason})
+                for emp in emps:
+                    report["skipped"].append({"emp": emp["en"], "reason": reason})
                 continue
 
+            any_template = True
             template_bytes = tpl_path.read_bytes()
-            # Write each employee in this PM's group
             for emp in emps:
                 f = _get_form(forms, emp["en"])
                 if not f:
+                    report["skipped"].append(
+                        {"emp": emp["en"], "reason": "沒有填寫資料（forms 中找不到）"})
                     continue
                 payload = _build_payload(emp, f)
                 try:
                     template_bytes = write_cht(template_bytes, payload)
-                except ValueError:
-                    pass  # employee not found in template, skip
+                    report["written"] += 1
+                except ValueError as e:
+                    report["skipped"].append(
+                        {"emp": emp["en"], "reason": f"範本中找不到此員工列（{e}）"})
 
-            # Add to zip with period in filename
             out_name = f"{period}_{tpl_name}" if period else tpl_name
             zf.writestr(out_name, template_bytes)
 
+    if not any_template:
+        # Every PM template was missing → don't hand back an empty zip silently.
+        raise FileNotFoundError(
+            "找不到任何 Nokia 工作天數表範本。請確認 templates/cht_nokia/ "
+            "底下有對應 PM 的 .xlsx，且 config.CHT_NOKIA_PM_FILES 的 PM 名稱與名單一致。"
+        )
+
     buf.seek(0)
-    return buf.getvalue()
+    return buf.getvalue(), report
 
 
-def batch_write_cht_dk(period: str, forms: dict[str, dict]) -> bytes:
-    """Write all DK employees into the single DK template."""
+def batch_write_cht_dk(period: str, forms: dict[str, dict]) -> tuple[bytes, dict]:
+    """Write all DK employees into the single DK template. Returns (bytes, report)."""
     people  = get_all()
     dk_emps = [p for p in people if p.get("pm") == "DK"]
+    report = {"target": "cht_dk", "written": 0, "skipped": [], "people_total": len(dk_emps)}
 
     tpl_path = CHT_DK_DIR / CHT_DK_TEMPLATE
     if not tpl_path.exists():
-        raise FileNotFoundError(f"DK template not found: {CHT_DK_TEMPLATE}")
+        raise FileNotFoundError(f"DK 範本不存在：templates/cht_dk/{CHT_DK_TEMPLATE}")
 
     template_bytes = tpl_path.read_bytes()
     for emp in dk_emps:
         f = _get_form(forms, emp["en"])
         if not f:
+            report["skipped"].append({"emp": emp["en"], "reason": "沒有填寫資料"})
             continue
         payload = _build_payload(emp, f, write_target="cht_dk")
         try:
             template_bytes = write_cht(template_bytes, payload)
-        except ValueError:
-            pass
+            report["written"] += 1
+        except ValueError as e:
+            report["skipped"].append({"emp": emp["en"], "reason": f"範本中找不到此員工列（{e}）"})
 
-    return template_bytes
+    return template_bytes, report
 
 
 def batch_write_wipro(template_bytes: bytes, sheet_name: str,
-                      forms: dict[str, dict]) -> bytes:
-    """Write all Wipro employees into SNDA Dashboard."""
+                      forms: dict[str, dict]) -> tuple[bytes, dict]:
+    """Write all Wipro employees into SNDA Dashboard. Returns (bytes, report)."""
     people     = get_all()
     wipro_emps = [p for p in people if p.get("unit") == "wipro"]
+    report = {"target": "wipro", "written": 0, "skipped": [], "people_total": len(wipro_emps)}
 
     for emp in wipro_emps:
         f = _get_form(forms, emp["en"])
         if not f:
+            report["skipped"].append({"emp": emp["en"], "reason": "沒有填寫資料"})
             continue
         ess_total   = sum(float(e.get("amount") or 0) for e in f.get("ess", []))
         shift_total = sum(float(e.get("amount") or 0) for e in f.get("ns", []))
@@ -111,19 +138,21 @@ def batch_write_wipro(template_bytes: bytes, sheet_name: str,
                 ot_entries=ot_entries, travel=ta_total,
                 sheet_name=sheet_name,
             )
-        except ValueError:
-            pass
+            report["written"] += 1
+        except ValueError as e:
+            report["skipped"].append({"emp": emp["en"], "reason": f"範本中找不到此員工列（{e}）"})
 
-    return template_bytes
+    return template_bytes, report
 
 
-def batch_write_project_f(template_bytes: bytes, forms: dict[str, dict]) -> bytes:
-    """Write all employees into Project F."""
+def batch_write_project_f(template_bytes: bytes, forms: dict[str, dict]) -> tuple[bytes, dict]:
+    """Write all employees into Project F. Returns (bytes, report)."""
     people = get_all()
+    report = {"target": "project_f", "written": 0, "skipped": [], "people_total": len(people)}
     for emp in people:
         f = _get_form(forms, emp["en"])
         if not f:
-            continue
+            continue  # Project F covers everyone; no-data is normal, don't spam report
         try:
             template_bytes = write_project_f(
                 template_bytes,
@@ -133,15 +162,17 @@ def batch_write_project_f(template_bytes: bytes, forms: dict[str, dict]) -> byte
                 ess_total=sum(float(e.get("amount") or 0) for e in f.get("ess", [])),
                 ta_total=sum(float(t.get("amount") or 0) for t in f.get("ta", [])),
             )
-        except ValueError:
-            pass
-    return template_bytes
+            report["written"] += 1
+        except ValueError as e:
+            report["skipped"].append({"emp": emp["en"], "reason": f"範本中找不到此員工列（{e}）"})
+    return template_bytes, report
 
 
 def batch_write_nokia_cost(template_bytes: bytes, sheet_name: str,
-                           forms: dict[str, dict]) -> bytes:
-    """Write all employees into Nokia 費用統整."""
+                           forms: dict[str, dict]) -> tuple[bytes, dict]:
+    """Write all employees into Nokia 費用統整. Returns (bytes, report)."""
     people = get_all()
+    report = {"target": "nokia_cost", "written": 0, "skipped": [], "people_total": len(people)}
     for emp in people:
         f = _get_form(forms, emp["en"])
         if not f:
@@ -172,9 +203,10 @@ def batch_write_nokia_cost(template_bytes: bytes, sheet_name: str,
                 ess_amount=sum(float(e.get("amount") or 0) for e in ess_rows) or None,
                 sheet_name=sheet_name or None,
             )
-        except ValueError:
-            pass
-    return template_bytes
+            report["written"] += 1
+        except ValueError as e:
+            report["skipped"].append({"emp": emp["en"], "reason": f"範本中找不到此員工列（{e}）"})
+    return template_bytes, report
 
 
 def _build_payload(emp: dict, f: dict, write_target: str = "cht_nokia") -> SubmitPayload:

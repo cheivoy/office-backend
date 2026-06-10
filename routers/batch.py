@@ -20,6 +20,25 @@ from config import DEPT_DIR
 router = APIRouter()
 
 
+# ── Write-report header helper ───────────────────────────────────────────────
+# The browser can't read a JSON body AND download a file in one response, so we
+# attach a compact JSON summary as a custom header. CORS must expose it.
+
+def _report_headers(filename: str, report: dict) -> dict:
+    import json as _json
+    from urllib.parse import quote
+    # Header values must be latin-1 safe.
+    #  - filename may contain 中文 → use RFC 5987 filename* (UTF-8, percent-encoded)
+    #  - report JSON → URL-encode (keeps 中文 intact, frontend decodes)
+    fn_ascii = filename.encode("ascii", "ignore").decode() or "download"
+    fn_star = quote(filename)
+    return {
+        "Content-Disposition": f"attachment; filename={fn_ascii}; filename*=UTF-8''{fn_star}",
+        "X-Write-Report": quote(_json.dumps(report, ensure_ascii=False)),
+        "Access-Control-Expose-Headers": "X-Write-Report, Content-Disposition",
+    }
+
+
 # ── Batch Write ──────────────────────────────────────────────────
 
 @router.post("/batch-write/cht-nokia")
@@ -30,13 +49,15 @@ async def bw_cht_nokia(
     """Write all CHT Nokia employees using fixed server templates."""
     forms = json.loads(forms_json)
     try:
-        zip_bytes = batch_write_cht_nokia(period, forms)
+        zip_bytes, report = batch_write_cht_nokia(period, forms)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(500, str(e))
     fname = f"Nokia_工作天數表_{period or 'batch'}.zip"
     return StreamingResponse(
         BytesIO(zip_bytes), media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_report_headers(fname, report),
     )
 
 
@@ -47,14 +68,14 @@ async def bw_cht_dk(
 ):
     forms = json.loads(forms_json)
     try:
-        result = batch_write_cht_dk(period, forms)
+        result, report = batch_write_cht_dk(period, forms)
     except FileNotFoundError as e:
         raise HTTPException(404, str(e))
     fname = f"MN_CHT_工時紀錄表_{period or 'batch'}.xlsx"
     return StreamingResponse(
         BytesIO(result),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_report_headers(fname, report),
     )
 
 
@@ -67,12 +88,12 @@ async def bw_wipro(
 ):
     forms = json.loads(forms_json)
     tb = await template.read()
-    result = batch_write_wipro(tb, sheet_name or period, forms)
+    result, report = batch_write_wipro(tb, sheet_name or period, forms)
     fname = f"SNDA_Dashboard_{period or 'batch'}.xlsx"
     return StreamingResponse(
         BytesIO(result),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_report_headers(fname, report),
     )
 
 
@@ -84,12 +105,12 @@ async def bw_project_f(
 ):
     forms = json.loads(forms_json)
     tb = await template.read()
-    result = batch_write_project_f(tb, forms)
+    result, report = batch_write_project_f(tb, forms)
     fname = f"Project_F_{period or 'batch'}.xlsx"
     return StreamingResponse(
         BytesIO(result),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_report_headers(fname, report),
     )
 
 
@@ -102,12 +123,12 @@ async def bw_nokia_cost(
 ):
     forms = json.loads(forms_json)
     tb = await template.read()
-    result = batch_write_nokia_cost(tb, sheet_name or period, forms)
+    result, report = batch_write_nokia_cost(tb, sheet_name or period, forms)
     fname = f"Nokia_費用統整_{period or 'batch'}.xlsx"
     return StreamingResponse(
         BytesIO(result),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={fname}"},
+        headers=_report_headers(fname, report),
     )
 
 
